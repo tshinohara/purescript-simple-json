@@ -2,12 +2,14 @@ module Simple.JSON where
 
 import Prelude
 
-import Data.Foreign (F, Foreign, readArray, readBoolean, readChar, readInt, readNumber, readString, toForeign)
+import Control.Alt ((<|>))
+import Data.Either (Either(..), either)
+import Data.Foreign (F, Foreign, readArray, readBoolean, readChar, readInt, readNull, readNumber, readString, toForeign)
 import Data.Foreign.Index (readProp)
 import Data.Foreign.Internal (readStrMap)
 import Data.Foreign.JSON (parseJSON)
-import Data.Foreign.NullOrUndefined (NullOrUndefined(NullOrUndefined), readNullOrUndefined, undefined)
-import Data.Maybe (maybe)
+import Data.Foreign.NullOrUndefined (NullOrUndefined(NullOrUndefined), readNullOrUndefined, unNullOrUndefined, undefined)
+import Data.Maybe (Maybe, maybe)
 import Data.Record (get, insert)
 import Data.StrMap as StrMap
 import Data.Symbol (class IsSymbol, SProxy(..), reflectSymbol)
@@ -15,6 +17,8 @@ import Data.Traversable (sequence)
 import Global.Unsafe (unsafeStringify)
 import Type.Prelude (class TypeEquals, to)
 import Type.Row (class ListToRow, class RowLacks, class RowToList, Cons, Nil, RLProxy(RLProxy), RProxy(..), kind RowList)
+
+foreign import _null :: Foreign
 
 -- | Read a JSON string to a type `a` using `F a`. Useful with record types.
 readJSON :: forall a
@@ -45,6 +49,18 @@ read = readImpl
 -- | A class for reading foreign values to a type
 class ReadForeign a where
   readImpl :: Foreign -> F a
+
+instance readEither ::
+  ( ReadForeign a
+  , ReadForeign b
+  ) => ReadForeign (Either a b) where
+  readImpl f = (Left <$> readImpl f) <|> (Right <$> readImpl f)
+
+instance readMaybe :: ReadForeign a => ReadForeign (Maybe a) where
+  readImpl f = unNullOrUndefined <$> readNullOrUndefined readImpl f
+
+instance readUnit :: ReadForeign Unit where
+  readImpl f = readNull f $> unit
 
 instance readForeign :: ReadForeign Foreign where
   readImpl = pure
@@ -116,6 +132,18 @@ instance readFieldsNil ::
 -- | need to do this intelligently using Foreign probably, because of null and undefined whatever
 class WriteForeign a where
   writeImpl :: a -> Foreign
+
+instance writeForeignEither ::
+  ( WriteForeign a
+  , WriteForeign b
+  ) => WriteForeign (Either a b) where
+  writeImpl = either writeImpl writeImpl
+
+instance writeForeignMaybe :: WriteForeign a => WriteForeign (Maybe a) where
+  writeImpl = maybe undefined writeImpl
+
+instance writeForeignUnit :: WriteForeign Unit where
+  writeImpl = const _null
 
 instance writeForeignForeign :: WriteForeign Foreign where
   writeImpl = id
